@@ -1,0 +1,14 @@
+POX 0.6.0 (fangtooth) / Copyright 2011-2018 James McCauley, et al.
+DEBUG:ofhandler:*** ofhandler: Successfully loaded ip settings for hosts
+ {'server1': '192.168.2.2', 'sw0-eth3': '10.0.1.1', 'sw0-eth1': '192.168.2.1', 'sw0-eth2': '172.64.3.1', 'client': '10.0.1.100', 'server2': '172.64.3.10'}
+
+INFO:srhandler:created server
+DEBUG:srhandler:SRServerListener listening on 8888
+DEBUG:core:POX 0.6.0 (fangtooth) going up...
+DEBUG:core:Running on CPython (2.7.17/Mar 8 2023 18:40:28)
+DEBUG:core:Platform is Linux-6.4.16-linuxkit-aarch64-with-Ubuntu-18.04-bionic
+INFO:core:POX 0.6.0 (fangtooth) is up.
+DEBUG:openflow.of_01:Listening on 0.0.0.0:6653
+INFO:openflow.of_01:[be-32-84-ea-2f-4e 2] connected
+DEBUG:ofhandler:Connection [be-32-84-ea-2f-4e 2]
+DEBUG:srhandler:SRServerListener catch RouterInfo even, info={'eth3': ('10.0.1.1', 'ba:b2:22:fb:50:76', '10Gbps', 3), 'eth2': ('172.64.3.1', '82:be:a5:8a:43:c0', '10Gbps', 2), 'eth1': ('192.168.2.1', '92:2e:47:c7:e6:7f', '10Gbps', 1)}, rtable=[('10.0.1.100', '10.0.1.100', '255.255.255.255', 'eth3'), ('192.168.2.2', '192.168.2.2', '255.255.255.255', 'eth1'), ('172.64.3.10', '172.64.3.10', '255.255.255.255', 'eth2')]

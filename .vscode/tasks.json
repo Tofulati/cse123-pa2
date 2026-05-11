@@ -1,0 +1,143 @@
+{
+    "version": "2.0.0",
+    "presentation": {
+        "echo": true,
+        "reveal": "always",
+        "focus": false,
+        "panel": "dedicated",
+        "showReuseMessage": true
+    },
+    "tasks": [
+        {
+            "label": "Create terminals",
+            "dependsOn": [
+                "Mininet",
+                "Solution"
+            ],
+            // Mark as the default build task so cmd/ctrl+shift+b will create them
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+        },
+        {
+            // The name that shows up in terminal tab
+            "label": "Clean",
+            // The task will launch a shell
+            "type": "shell",
+            "command": "/project-base/killall.sh; sudo mn -c; exit 0",
+            // Set the shell type
+            "options": {
+                "shell": {
+                    "executable": "bash",
+                    "args": [
+                        "-c"
+                    ]
+                }
+            },
+            // Mark as a background task to avoid the spinner animation on the terminal tab
+            "isBackground": false,
+            "problemMatcher": [],
+        },
+        {
+            // The name that shows up in terminal tab
+            "label": "POX",
+            "dependsOn": [
+                "Clean"
+            ],
+            // The task will launch a shell
+            "type": "shell",
+            "command": "cd /project-base && ./run_pox.sh",
+            // Set the shell type
+            "options": {
+                "shell": {
+                    "executable": "bash",
+                    "args": [
+                        "-c"
+                    ]
+                }
+            },
+            // Mark as a background task to avoid the spinner animation on the terminal tab
+            "isBackground": true,
+            "problemMatcher": {
+                "pattern": {
+                    "regexp": ""
+                },
+                "background": {
+                    "activeOnStart": true,
+                    "beginsPattern": ".",
+                    "endsPattern": "^.*Listening on 0.0.0.0:6633",
+                }
+            },
+        },
+        {
+            "label": "Mininet",
+            "type": "shell",
+            "dependsOn": [
+                "POX"
+            ],
+            "command": "cd /project-base && ./run_mininet.sh",
+            "options": {
+                "shell": {
+                    "executable": "bash",
+                    "args": [
+                        "-c"
+                    ]
+                }
+            },
+            "isBackground": true,
+            "problemMatcher": {
+                "pattern": {
+                    "regexp": ""
+                },
+                "background": {
+                    "activeOnStart": true,
+                    "beginsPattern": ".",
+                    "endsPattern": "^\\*\\*\\* Starting CLI:",
+                }
+            },
+            "presentation": {
+                "group": "outputs"
+            }
+        },
+        {
+            "label": "SolutionBuild",
+            "type": "shell",
+            "command": "make",
+            "options": {
+                "shell": {
+                    "executable": "bash",
+                    "args": [
+                        "-c"
+                    ]
+                }
+            },
+            "problemMatcher": [],
+        },
+        {
+            "label": "Solution",
+            "dependsOn": [
+                "SolutionBuild",
+            ],
+            "type": "shell",
+            "command": "./sr",
+            "args": [
+                "-l",
+                "test.pcap"
+            ],
+            "options": {
+                "shell": {
+                    "executable": "bash",
+                    "args": [
+                        "-c"
+                    ]
+                }
+            },
+            "isBackground": false,
+            "problemMatcher": [],
+            "presentation": {
+                "group": "outputs"
+            }
+        }
+    ]
+}
