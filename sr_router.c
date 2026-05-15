@@ -16,6 +16,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <unistd.h>
+#include <pthread.h>
 
 #include "sr_if.h"
 #include "sr_rt.h"
@@ -94,6 +96,9 @@ static void forward_ip_packet(struct sr_instance *sr, uint8_t *packet, unsigned 
 /* ARP queue helper */
 void handle_arpreq(struct sr_instance *sr, struct sr_arpreq *req);
 
+/* Periodically drive ARP retries; starter sr_arpcache_sweepreqs() is empty. */
+static void *sr_arpreq_sweep_thread(void *sr_ptr);
+
 /*---------------------------------------------------------------------
  * Method: sr_init(void)
  * Scope:  Global
@@ -117,8 +122,15 @@ void sr_init(struct sr_instance* sr)
     pthread_t thread;
 
     pthread_create(&thread, &(sr->attr), sr_arpcache_timeout, sr);
-    
-    /* Add initialization code here! */
+
+    pthread_t sweep_thread;
+    pthread_attr_t sweep_attr;
+    pthread_attr_init(&sweep_attr);
+    pthread_attr_setdetachstate(&sweep_attr, PTHREAD_CREATE_DETACHED);
+    if (pthread_create(&sweep_thread, &sweep_attr, sr_arpreq_sweep_thread, sr) != 0) {
+        fprintf(stderr, "sr_init: failed to start ARP sweep thread\n");
+    }
+    pthread_attr_destroy(&sweep_attr);
 
 } /* -- sr_init -- */
 
@@ -411,9 +423,9 @@ static void send_icmp_error(struct sr_instance *sr, uint8_t *og_packet, char *in
 static struct sr_rt *routing_table_lookup(struct sr_instance *sr, uint32_t dst_ip) {
 	struct sr_rt *entry;
 	for (entry = sr->routing_table; entry != NULL; entry = entry->next) {
-		if ((entry->dest.s_addr & entry->mask.s_addr) == (dst_ip & entry->mask.s_addr)) {
+		if (entry->dest.s_addr == dst_ip) {
 			return entry;
-		} 
+		}
 	}
 
 	return NULL;
@@ -440,9 +452,11 @@ static void forward_ip_packet(struct sr_instance *sr, uint8_t *packet, unsigned 
 
 /* ARP queue helper */
 void handle_arpreq(struct sr_instance *sr, struct sr_arpreq *req) {
+	pthread_mutex_lock(&(sr->cache.lock));
 	time_t now = time(NULL);
 
 	if (difftime(now, req->sent) < 1.0) {
+		pthread_mutex_unlock(&(sr->cache.lock));
 		return;
 	}
 
@@ -465,6 +479,26 @@ void handle_arpreq(struct sr_instance *sr, struct sr_arpreq *req) {
 		req->sent = now;
 		req->times_sent += 1;
 	}
+
+	pthread_mutex_unlock(&(sr->cache.lock));
+}
+
+static void *sr_arpreq_sweep_thread(void *sr_ptr) {
+	struct sr_instance *sr = (struct sr_instance *)sr_ptr;
+
+	while (1) {
+		sleep(1);
+		pthread_mutex_lock(&sr->cache.lock);
+		struct sr_arpreq *req = sr->cache.requests;
+		while (req != NULL) {
+			struct sr_arpreq *next = req->next;
+			handle_arpreq(sr, req);
+			req = next;
+		}
+		pthread_mutex_unlock(&sr->cache.lock);
+	}
+
+	return NULL;
 }
 
 /* end sr_ForwardPacket */
