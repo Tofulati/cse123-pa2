@@ -96,9 +96,6 @@ static void forward_ip_packet(struct sr_instance *sr, uint8_t *packet, unsigned 
 /* ARP queue helper */
 extern void handle_arpreq(struct sr_instance *sr, struct sr_arpreq *req);
 
-/* Periodically drive ARP retries; starter sr_arpcache_sweepreqs() is empty. */
-static void *sr_arpreq_sweep_thread(void *sr_ptr);
-
 /*---------------------------------------------------------------------
  * Method: sr_init(void)
  * Scope:  Global
@@ -122,15 +119,6 @@ void sr_init(struct sr_instance* sr)
     pthread_t thread;
 
     pthread_create(&thread, &(sr->attr), sr_arpcache_timeout, sr);
-
-    pthread_t sweep_thread;
-    pthread_attr_t sweep_attr;
-    pthread_attr_init(&sweep_attr);
-    pthread_attr_setdetachstate(&sweep_attr, PTHREAD_CREATE_DETACHED);
-    if (pthread_create(&sweep_thread, &sweep_attr, sr_arpreq_sweep_thread, sr) != 0) {
-        fprintf(stderr, "sr_init: failed to start ARP sweep thread\n");
-    }
-    pthread_attr_destroy(&sweep_attr);
 
 } /* -- sr_init -- */
 
@@ -427,40 +415,34 @@ static void send_icmp_error(struct sr_instance *sr, uint8_t *og_packet, char *in
 /* Routing/Forward helper */
 static struct sr_rt *routing_table_lookup(struct sr_instance *sr, uint32_t dst_ip) {
     struct sr_rt *entry;
-    struct sr_rt *best = NULL;
-    uint32_t best_mask = 0;
-
     for (entry = sr->routing_table; entry != NULL; entry = entry->next) {
-        uint32_t mask = entry->mask.s_addr;
-        if ((dst_ip & mask) == (entry->dest.s_addr & mask)) {
-            if (ntohl(mask) >= ntohl(best_mask)) {
-                best = entry;
-                best_mask = mask;
-            }
+        if (entry->dest.s_addr == dst_ip) {
+            return entry;
         }
     }
-
-    return best;
+    return NULL;
 }
 
 static void forward_ip_packet(struct sr_instance *sr, uint8_t *packet, unsigned int len, struct sr_rt *rt_entry) {
-	struct sr_if *out_if = sr_get_interface(sr, rt_entry->interface);
-	if (!out_if) return;
+    struct sr_if *out_if = sr_get_interface(sr, rt_entry->interface);
+    if (!out_if) return;
 
-	uint32_t next_hop_ip = rt_entry->gw.s_addr;
-	uint8_t *fwd_packet = (uint8_t*)malloc(len);
-	memcpy(fwd_packet, packet, len);
+    uint32_t next_hop_ip = rt_entry->gw.s_addr;
 
-	sr_ethernet_hdr_t *fwd_eth = (sr_ethernet_hdr_t*)fwd_packet;
-	memcpy(fwd_eth->ether_shost, out_if->addr, ETHER_ADDR_LEN);
-	memset(fwd_eth->ether_dhost, 0x00, ETHER_ADDR_LEN);
-	fwd_eth->ether_type = htons(ethertype_ip);
+    uint8_t *fwd_packet = (uint8_t *)malloc(len);
+    memcpy(fwd_packet, packet, len);
 
-	struct sr_arpreq *req = sr_arpcache_queuereq(&sr->cache, next_hop_ip, fwd_packet, len, rt_entry->interface);
-	free(fwd_packet);
+    sr_ethernet_hdr_t *fwd_eth = (sr_ethernet_hdr_t *)fwd_packet;
+    memcpy(fwd_eth->ether_shost, out_if->addr, ETHER_ADDR_LEN);
+    memset(fwd_eth->ether_dhost, 0x00, ETHER_ADDR_LEN);
+    fwd_eth->ether_type = htons(ethertype_ip);
 
-	handle_arpreq(sr, req);
+    struct sr_arpreq *req = sr_arpcache_queuereq(&sr->cache, next_hop_ip, fwd_packet, len, rt_entry->interface);
+    free(fwd_packet);
+
+    handle_arpreq(sr, req);
 }
+
 
 /* ARP queue helper */
 void handle_arpreq(struct sr_instance *sr, struct sr_arpreq *req) {
@@ -486,26 +468,6 @@ void handle_arpreq(struct sr_instance *sr, struct sr_arpreq *req) {
         req->sent = now;
         req->times_sent++;
     }
-}
-
-
-static void *sr_arpreq_sweep_thread(void *sr_ptr) {
-	struct sr_instance *sr = (struct sr_instance *)sr_ptr;
-
-	while (1) {
-		sleep(1);
-		pthread_mutex_lock(&sr->cache.lock);
-		struct sr_arpreq *req = sr->cache.requests;
-		pthread_mutex_unlock(&sr->cache.lock);
-
-		while (req != NULL) {
-			struct sr_arpreq *next = req->next;
-			handle_arpreq(sr, req);
-			req = next;
-		}
-	}
-
-	return NULL;
 }
 
 /* end sr_ForwardPacket */
