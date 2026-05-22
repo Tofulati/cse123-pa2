@@ -94,7 +94,7 @@ static struct sr_rt *routing_table_lookup(struct sr_instance *sr, uint32_t dst_i
 static void forward_ip_packet(struct sr_instance *sr, uint8_t *packet, unsigned int len, struct sr_rt *rt_entry);
 
 /* ARP queue helper */
-void handle_arpreq(struct sr_instance *sr, struct sr_arpreq *req);
+extern void handle_arpreq(struct sr_instance *sr, struct sr_arpreq *req);
 
 /* Periodically drive ARP retries; starter sr_arpcache_sweepreqs() is empty. */
 static void *sr_arpreq_sweep_thread(void *sr_ptr);
@@ -426,14 +426,21 @@ static void send_icmp_error(struct sr_instance *sr, uint8_t *og_packet, char *in
 
 /* Routing/Forward helper */
 static struct sr_rt *routing_table_lookup(struct sr_instance *sr, uint32_t dst_ip) {
-	struct sr_rt *entry;
-	for (entry = sr->routing_table; entry != NULL; entry = entry->next) {
-		if (entry->dest.s_addr == dst_ip) {
-			return entry;
-		}
-	}
+    struct sr_rt *entry;
+    struct sr_rt *best = NULL;
+    uint32_t best_mask = 0;
 
-	return NULL;
+    for (entry = sr->routing_table; entry != NULL; entry = entry->next) {
+        uint32_t mask = entry->mask.s_addr;
+        if ((dst_ip & mask) == (entry->dest.s_addr & mask)) {
+            if (ntohl(mask) >= ntohl(best_mask)) {
+                best = entry;
+                best_mask = mask;
+            }
+        }
+    }
+
+    return best;
 }
 
 static void forward_ip_packet(struct sr_instance *sr, uint8_t *packet, unsigned int len, struct sr_rt *rt_entry) {
@@ -457,33 +464,30 @@ static void forward_ip_packet(struct sr_instance *sr, uint8_t *packet, unsigned 
 
 /* ARP queue helper */
 void handle_arpreq(struct sr_instance *sr, struct sr_arpreq *req) {
-	pthread_mutex_lock(&(sr->cache.lock));
-	time_t now = time(NULL);
+    time_t now = time(NULL);
 
-	if (difftime(now, req->sent) < 1.0) {
-		pthread_mutex_unlock(&(sr->cache.lock));
-		return;
-	}
+    if (difftime(now, req->sent) < 1.0) {
+        return;
+    }
 
-	if (req->times_sent >= 5) {
-		struct sr_packet *pkt;
-		for (pkt = req->packets; pkt != NULL; pkt = pkt->next) {
-			send_icmp_error(sr, pkt->buf, pkt->iface, 3, 1);
-		}
-		sr_arpreq_destroy(&sr->cache, req);
-	} else {
-		if (req->packets) {
-			struct sr_if *out_if = sr_get_interface(sr, req->packets->iface);
-			if (out_if) {
-				send_arp_request(sr, req->ip, out_if);
-			}
-		}
-		req->sent = now;
-		req->times_sent += 1;
-	}
-
-	pthread_mutex_unlock(&(sr->cache.lock));
+    if (req->times_sent >= 5) {
+        struct sr_packet *pkt;
+        for (pkt = req->packets; pkt != NULL; pkt = pkt->next) {
+            send_icmp_error(sr, pkt->buf, pkt->iface, 3, 1);
+        }
+        sr_arpreq_destroy(&sr->cache, req);
+    } else {
+        if (req->packets) {
+            struct sr_if *out_if = sr_get_interface(sr, req->packets->iface);
+            if (out_if) {
+                send_arp_request(sr, req->ip, out_if);
+            }
+        }
+        req->sent = now;
+        req->times_sent++;
+    }
 }
+
 
 static void *sr_arpreq_sweep_thread(void *sr_ptr) {
 	struct sr_instance *sr = (struct sr_instance *)sr_ptr;
