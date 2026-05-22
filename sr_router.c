@@ -429,6 +429,8 @@ static void forward_ip_packet(struct sr_instance *sr, uint8_t *packet, unsigned 
 
     uint32_t next_hop_ip = rt_entry->gw.s_addr;
 
+    /* Keep original packet intact for ICMP error generation.
+       Make a copy only for the forwarded version. */
     uint8_t *fwd_packet = (uint8_t *)malloc(len);
     memcpy(fwd_packet, packet, len);
 
@@ -437,12 +439,13 @@ static void forward_ip_packet(struct sr_instance *sr, uint8_t *packet, unsigned 
     memset(fwd_eth->ether_dhost, 0x00, ETHER_ADDR_LEN);
     fwd_eth->ether_type = htons(ethertype_ip);
 
-    struct sr_arpreq *req = sr_arpcache_queuereq(&sr->cache, next_hop_ip, fwd_packet, len, rt_entry->interface);
+    /* Queue the ORIGINAL packet (not fwd_packet) so handle_arpreq
+       can build a correct ICMP error back to the real sender */
+    struct sr_arpreq *req = sr_arpcache_queuereq(&sr->cache, next_hop_ip, packet, len, rt_entry->interface);
     free(fwd_packet);
 
     handle_arpreq(sr, req);
 }
-
 
 /* ARP queue helper */
 void handle_arpreq(struct sr_instance *sr, struct sr_arpreq *req) {
@@ -455,7 +458,16 @@ void handle_arpreq(struct sr_instance *sr, struct sr_arpreq *req) {
     if (req->times_sent >= 5) {
         struct sr_packet *pkt;
         for (pkt = req->packets; pkt != NULL; pkt = pkt->next) {
-            send_icmp_error(sr, pkt->buf, pkt->iface, 3, 1);
+            sr_ip_hdr_t *ip_hdr = (sr_ip_hdr_t *)(pkt->buf + sizeof(sr_ethernet_hdr_t));
+
+            /* Find which interface to send ICMP error back through */
+            struct sr_rt *rt = routing_table_lookup(sr, ip_hdr->ip_src);
+            char *reply_iface = pkt->iface; /* fallback */
+            if (rt) {
+                reply_iface = rt->interface;
+            }
+
+            send_icmp_error(sr, pkt->buf, reply_iface, 3, 1);
         }
         sr_arpreq_destroy(&sr->cache, req);
     } else {
