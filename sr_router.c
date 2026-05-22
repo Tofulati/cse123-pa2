@@ -199,22 +199,28 @@ static void handle_arp_packet(struct sr_instance *sr, uint8_t *packet, unsigned 
 			send_arp_reply(sr, arp_hdr, iface);
 		}
 	} else if (op == arp_op_reply) {
-		struct sr_arpreq *req = sr_arpcache_insert(&sr->cache, arp_hdr->ar_sha, arp_hdr->ar_sip);
+		pthread_mutex_lock(&sr->cache.lock);
+
+		struct sr_arpreq *req = sr->cache.requests;
+		while (req != NULL) {
+			if (req->ip == arp_hdr->ar_sip) break;
+			req = req->next;
+		}
 
 		if (req) {
 			struct sr_packet *pkt;
 			for (pkt = req->packets; pkt != NULL; pkt = pkt->next) {
 				struct sr_if *out_if = sr_get_interface(sr, pkt->iface);
 				if (!out_if) continue;
-
-				sr_ethernet_hdr_t *fwd_eth = (sr_ethernet_hdr_t*)pkt->buf;
+				sr_ethernet_hdr_t *fwd_eth = (sr_ethernet_hdr_t *)pkt->buf;
 				memcpy(fwd_eth->ether_dhost, arp_hdr->ar_sha, ETHER_ADDR_LEN);
 				memcpy(fwd_eth->ether_shost, out_if->addr, ETHER_ADDR_LEN);
-
 				sr_send_packet(sr, pkt->buf, pkt->len, pkt->iface);
 			}
 			sr_arpreq_destroy(&sr->cache, req);
 		}
+
+		pthread_mutex_unlock(&sr->cache.lock);
 	}
 }
 
@@ -348,7 +354,6 @@ static void send_icmp_echo_reply(struct sr_instance *sr, uint8_t *og_packet, uns
 	unsigned int reply_len = og_len;
 	uint8_t *reply = (uint8_t*)malloc(reply_len);
 	memcpy(reply, og_packet, reply_len);
-
 	struct sr_if *in_if = sr_get_interface(sr, in_iface_name);
 
 	sr_ethernet_hdr_t *reply_eth = (sr_ethernet_hdr_t*)reply;
@@ -463,10 +468,7 @@ void handle_arpreq(struct sr_instance *sr, struct sr_arpreq *req) {
 	if (req->times_sent >= 5) {
 		struct sr_packet *pkt;
 		for (pkt = req->packets; pkt != NULL; pkt = pkt->next) {
-			sr_ip_hdr_t *og_ip = (sr_ip_hdr_t*)(pkt->buf + sizeof(sr_ethernet_hdr_t));
-			struct sr_rt *rt = routing_table_lookup(sr, og_ip->ip_src);
-			char *return_iface = rt ? rt->interface : pkt->iface;
-			send_icmp_error(sr, pkt->buf, return_iface, 3, 1);
+			send_icmp_error(sr, pkt->buf, pkt->iface, 3, 1);
 		}
 		sr_arpreq_destroy(&sr->cache, req);
 	} else {
@@ -490,12 +492,13 @@ static void *sr_arpreq_sweep_thread(void *sr_ptr) {
 		sleep(1);
 		pthread_mutex_lock(&sr->cache.lock);
 		struct sr_arpreq *req = sr->cache.requests;
+		pthread_mutex_unlock(&sr->cache.lock);
+
 		while (req != NULL) {
 			struct sr_arpreq *next = req->next;
 			handle_arpreq(sr, req);
 			req = next;
 		}
-		pthread_mutex_unlock(&sr->cache.lock);
 	}
 
 	return NULL;

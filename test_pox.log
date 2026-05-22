@@ -9,6 +9,6 @@ DEBUG:core:Running on CPython (2.7.17/Mar 8 2023 18:40:28)
 DEBUG:core:Platform is Linux-6.12.54-linuxkit-aarch64-with-Ubuntu-18.04-bionic
 INFO:core:POX 0.6.0 (fangtooth) is up.
 DEBUG:openflow.of_01:Listening on 0.0.0.0:6653
-INFO:openflow.of_01:[c6-1d-5e-75-8e-4e 2] connected
-DEBUG:ofhandler:Connection [c6-1d-5e-75-8e-4e 2]
-DEBUG:srhandler:SRServerListener catch RouterInfo even, info={'eth3': ('10.0.1.1', '66:14:34:43:4c:7e', '10Gbps', 3), 'eth2': ('172.64.3.1', '0e:23:1c:7d:46:6f', '10Gbps', 2), 'eth1': ('192.168.2.1', '86:de:2e:50:8d:de', '10Gbps', 1)}, rtable=[('10.0.1.100', '10.0.1.100', '255.255.255.255', 'eth3'), ('192.168.2.2', '192.168.2.2', '255.255.255.255', 'eth1'), ('172.64.3.10', '172.64.3.10', '255.255.255.255', 'eth2')]
+INFO:openflow.of_01:[7a-9c-1c-20-4b-49 2] connected
+DEBUG:ofhandler:Connection [7a-9c-1c-20-4b-49 2]
+DEBUG:srhandler:SRServerListener catch RouterInfo even, info={'eth3': ('10.0.1.1', '26:e7:db:f7:44:4c', '10Gbps', 3), 'eth2': ('172.64.3.1', 'e6:d3:e4:cc:b2:49', '10Gbps', 2), 'eth1': ('192.168.2.1', '42:9a:14:4a:99:6d', '10Gbps', 1)}, rtable=[('10.0.1.100', '10.0.1.100', '255.255.255.255', 'eth3'), ('192.168.2.2', '192.168.2.2', '255.255.255.255', 'eth1'), ('172.64.3.10', '172.64.3.10', '255.255.255.255', 'eth2')]
