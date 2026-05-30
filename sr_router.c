@@ -76,6 +76,9 @@
 	- sr->routing_table: linked list of routing entries
 */
 
+#define IP_PROTO_TCP 6
+#define IP_PROTO_UDP 17
+
 /* ARP helper */
 static void handle_arp_packet(struct sr_instance *sr, uint8_t *packet, unsigned int len, char *interface);
 static void send_arp_reply(struct sr_instance *sr, sr_arp_hdr_t *req_arp, struct sr_if *iface);
@@ -114,7 +117,6 @@ void sr_init(struct sr_instance* sr)
 
     pthread_attr_init(&(sr->attr));
     pthread_attr_setdetachstate(&(sr->attr), PTHREAD_CREATE_JOINABLE);
-    pthread_attr_setscope(&(sr->attr), PTHREAD_SCOPE_SYSTEM);
     pthread_attr_setscope(&(sr->attr), PTHREAD_SCOPE_SYSTEM);
     pthread_t thread;
 
@@ -187,13 +189,9 @@ static void handle_arp_packet(struct sr_instance *sr, uint8_t *packet, unsigned 
 			send_arp_reply(sr, arp_hdr, iface);
 		}
 	} else if (op == arp_op_reply) {
-		pthread_mutex_lock(&sr->cache.lock);
+		if (!ip_for_me(sr, arp_hdr->ar_tip, NULL)) return;
 
-		struct sr_arpreq *req = sr->cache.requests;
-		while (req != NULL) {
-			if (req->ip == arp_hdr->ar_sip) break;
-			req = req->next;
-		}
+		struct sr_arpreq *req = sr_arpcache_insert(&sr->cache, arp_hdr->ar_sha, arp_hdr->ar_sip);
 
 		if (req) {
 			struct sr_packet *pkt;
@@ -207,8 +205,6 @@ static void handle_arp_packet(struct sr_instance *sr, uint8_t *packet, unsigned 
 			}
 			sr_arpreq_destroy(&sr->cache, req);
 		}
-
-		pthread_mutex_unlock(&sr->cache.lock);
 	}
 }
 
@@ -301,26 +297,29 @@ static void handle_ip_packet(struct sr_instance *sr, uint8_t *packet, unsigned i
             if (icmp_hdr->icmp_type == 8) {
                 send_icmp_echo_reply(sr, packet, len, interface);
             }
-        }
-        return;
+        } else if (ip_hdr->ip_p == IP_PROTO_TCP || ip_hdr->ip_p == IP_PROTO_UDP) {
+		send_icmp_error(sr, packet, interface, 3, 3);
+	}
+       	
+	return;
     }
- 
-    if (ip_hdr->ip_ttl <= 1) {
-        send_icmp_error(sr, packet, interface, 11, 0);
-        return;
-    }
-    ip_hdr->ip_ttl--;
- 
-    ip_hdr->ip_sum = 0;
-    ip_hdr->ip_sum = cksum(ip_hdr, ip_hdr->ip_hl * 4);
- 
-    struct sr_rt *rt_entry = routing_table_lookup(sr, ip_hdr->ip_dst);
-    if (!rt_entry) {
-        send_icmp_error(sr, packet, interface, 3, 0);
-        return;
-    }
+	
+	struct sr_rt *rt_entry = routing_table_lookup(sr, ip_hdr->ip_dst);
+	if (!rt_entry) {
+		send_icmp_error(sr, packet, interface, 3, 0);
+		return;
+	} 
 
-    forward_ip_packet(sr, packet, len, rt_entry);
+	if (ip_hdr->ip_ttl <= 1) {
+		send_icmp_error(sr, packet, interface, 11, 0);
+		return;
+	}
+
+	ip_hdr->ip_ttl--;
+	ip_hdr->ip_sum = 0;
+	ip_hdr->ip_sum = cksum(ip_hdr, ip_hdr->ip_hl * 4);
+
+	forward_ip_packet(sr, packet, len, rt_entry);
 }
 
 static int ip_for_me(struct sr_instance *sr, uint32_t dst_ip, struct sr_if **matched_iface) {
@@ -415,12 +414,20 @@ static void send_icmp_error(struct sr_instance *sr, uint8_t *og_packet, char *in
 /* Routing/Forward helper */
 static struct sr_rt *routing_table_lookup(struct sr_instance *sr, uint32_t dst_ip) {
     struct sr_rt *entry;
-    for (entry = sr->routing_table; entry != NULL; entry = entry->next) {
-        if (entry->dest.s_addr == dst_ip) {
-            return entry;
-        }
-    }
-    return NULL;
+	struct sr_rt *best = NULL;
+	uint32_t best_mask = 0;
+
+	for (entry = sr->routing_table; entry != NULL; entry = entry->next) {
+		uint32_t mask = entry->mask.s_addr;
+
+		if ((dst_ip & mask) == (entry->dest.s_addr & mask)) {
+			if (ntohl(mask) >= ntohl(best_mask)) {
+				best = entry;
+				best_mask = mask;
+			}
+		}
+	}	
+	return best;
 }
 
 static void forward_ip_packet(struct sr_instance *sr, uint8_t *packet, unsigned int len, struct sr_rt *rt_entry) {
@@ -436,15 +443,21 @@ static void forward_ip_packet(struct sr_instance *sr, uint8_t *packet, unsigned 
 
     sr_ethernet_hdr_t *fwd_eth = (sr_ethernet_hdr_t *)fwd_packet;
     memcpy(fwd_eth->ether_shost, out_if->addr, ETHER_ADDR_LEN);
-    memset(fwd_eth->ether_dhost, 0x00, ETHER_ADDR_LEN);
     fwd_eth->ether_type = htons(ethertype_ip);
+	
+	struct sr_arpentry *cached = sr_arpcache_lookup(&sr->cache, next_hop_ip);
 
-    /* Queue the ORIGINAL packet (not fwd_packet) so handle_arpreq
-       can build a correct ICMP error back to the real sender */
-    struct sr_arpreq *req = sr_arpcache_queuereq(&sr->cache, next_hop_ip, packet, len, rt_entry->interface);
-    free(fwd_packet);
-
-    handle_arpreq(sr, req);
+	if (cached) {
+		memcpy(fwd_eth->ether_dhost, cached->mac, ETHER_ADDR_LEN);
+		free(cached);
+		sr_send_packet(sr, fwd_packet, len, rt_entry->interface);
+		free(fwd_packet);
+	} else {
+		memset(fwd_eth->ether_dhost, 0x00, ETHER_ADDR_LEN);
+		struct sr_arpreq *req = sr_arpcache_queuereq(&sr->cache, next_hop_ip, fwd_packet, len, rt_entry->interface);
+		free(fwd_packet);
+		handle_arpreq(sr, req);
+	}
 }
 
 /* ARP queue helper */
