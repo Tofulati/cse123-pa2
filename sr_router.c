@@ -464,9 +464,9 @@ static void forward_ip_packet(struct sr_instance *sr, uint8_t *packet, unsigned 
 void handle_arpreq(struct sr_instance *sr, struct sr_arpreq *req) {
     time_t now = time(NULL);
 
-    if (difftime(now, req->sent) < 1.0) {
-        return;
-    }
+	if (req->times_sent > 0 && difftime(now, req->sent) < 1.0) {
+    		return;
+	}	
 
     if (req->times_sent >= 5) {
         struct sr_packet *pkt;

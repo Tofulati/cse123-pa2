@@ -1,0 +1,4 @@
+sr_arpcache.c: In function 'sr_arpcache_sweepreqs':
+sr_arpcache.c:23:9: warning: implicit declaration of function 'handle_arpreq' [-Wimplicit-function-declaration]
+         handle_arpreq(sr, req);
+         ^~~~~~~~~~~~~
